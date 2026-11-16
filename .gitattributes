@@ -1,0 +1,2 @@
+# Les exports gardent leurs octets : CP850, fins de ligne de l'ERP
+*.DAT binary

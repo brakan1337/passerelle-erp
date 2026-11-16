@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Perl ${{ matrix.perl }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 5.10 : la version d'AIX 7.1 et de Red Hat 6, celle du serveur.
+        perl: ['5.10', '5.18', '5.26', '5.34', 'latest']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shogo82148/actions-setup-perl@v1
+        with:
+          perl-version: ${{ matrix.perl }}
+      - name: Version de Perl
+        run: perl -v | sed -n 2p
+      - name: Syntaxe
+        run: for f in bin/passerelle outils/*.pl lib/Passerelle/*.pm; do perl -Ilib -wc "$f"; done
+      - name: Tests (modules de base uniquement, rien d'installé)
+        run: prove -l t
+      - name: De l'export de l'ERP au CSV
+        run: |
+          mkdir sortie
+          perl bin/passerelle --sortie sortie exemples/APP00412.DAT || test $? -eq 1
+          cat sortie/rejets_MONT_000412.csv
+      - name: Vitesse (1 million d'apports)
+        run: perl outils/banc.pl 1000000

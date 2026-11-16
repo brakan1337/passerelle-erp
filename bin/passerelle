@@ -1,0 +1,124 @@
+#!/usr/bin/env perl
+
+# Passerelle d'export : convertit les fichiers d'apports de l'ERP en CSV
+# pour l'outil de suivi, et met de côté les lignes fausses avec leur motif.
+#
+# Codes de sortie, pour le cron :
+#   0  tout est passé (ou fichier déjà traité)
+#   1  lot livré, mais des lignes sont rejetées
+#   2  lot refusé : rien n'est livré
+#   3  erreur d'utilisation ou de configuration
+
+use 5.010_001;
+use strict;
+use warnings;
+use utf8;
+
+use FindBin ();
+use lib "$FindBin::Bin/../lib";
+
+use File::Spec;
+use Getopt::Long qw(GetOptions);
+
+use Passerelle::Copybook qw(lire_copybook);
+use Passerelle::Lot qw(traiter_fichier charger_produits verifier_format);
+
+binmode STDOUT, ':encoding(UTF-8)';
+binmode STDERR, ':encoding(UTF-8)';
+
+my $racine = File::Spec->catdir($FindBin::Bin, File::Spec->updir);
+my %o = (
+    format   => File::Spec->catfile($racine, 'formats', 'apports.cpy'),
+    produits => File::Spec->catfile($racine, 'config', 'produits.csv'),
+    sortie   => '.',
+    encodage => 'cp850',
+);
+
+GetOptions(\%o, 'format=s', 'produits=s', 'sortie=s', 'encodage=s', 'force', 'aide|help')
+  or usage(3);
+usage(0) if $o{aide};
+usage(3) if !@ARGV;
+
+my ($format, $produits) = eval {
+    my $f = lire_copybook($o{format});
+    verifier_format($f);
+    ($f, charger_produits($o{produits}));
+};
+erreur($@) if !$format;
+erreur("Dossier de sortie introuvable : $o{sortie}") if !-d $o{sortie};
+
+my $code = 0;
+for my $fichier (@ARGV) {
+    my $r = eval {
+        traiter_fichier(
+            fichier  => $fichier,
+            format   => $format,
+            produits => $produits,
+            sortie   => $o{sortie},
+            encodage => $o{encodage},
+            force    => $o{force},
+        );
+    };
+    if (!$r) {
+        print STDERR "$fichier : " . nettoyer($@) . "\n";
+        $code = 3;
+        next;
+    }
+    afficher($r);
+    $code = $r->{statut} if $r->{statut} > $code;
+}
+exit $code;
+
+sub afficher {
+    my ($r) = @_;
+    if ($r->{deja}) {
+        print "$r->{fichier} : déjà traité le $r->{deja}{quand} (lot $r->{deja}{lot}), ignoré ; "
+          . "--force pour le retraiter\n";
+        return;
+    }
+    if ($r->{refus}) {
+        print STDERR "$r->{fichier} : LOT REFUSÉ, $r->{refus}\n";
+        print STDERR "  rejets  : $r->{rejets_csv}\n";
+        return;
+    }
+    printf "%s : lot %s du site %s, %d apports lus, %d acceptés, %d rejetés\n",
+      $r->{fichier}, $r->{lot}, $r->{site}, $r->{apports_lus}, $r->{acceptes}, $r->{rejetes};
+    print "  attention : $r->{avertissement}\n" if $r->{avertissement};
+    print "  apports : $r->{apports_csv}\n";
+    print "  rejets  : $r->{rejets_csv}\n" if $r->{rejets_csv};
+    return;
+}
+
+sub nettoyer {
+    my ($message) = @_;
+    $message =~ s/ at \S+ line \d+\.?\n?\z//;
+    $message =~ s/\s+\z//;
+    return $message;
+}
+
+sub erreur {
+    print STDERR 'erreur : ' . nettoyer($_[0]) . "\n";
+    exit 3;
+}
+
+sub usage {
+    my ($code_sortie) = @_;
+    my $texte = <<'FIN';
+Utilisation : passerelle [options] FICHIER...
+
+Convertit les exports d'apports de l'ERP en CSV pour l'outil de suivi.
+Pour chaque lot, écrit apports_SITE_LOT.csv et, s'il y en a, rejets_SITE_LOT.csv.
+
+Options :
+  --sortie DOSSIER     où écrire les CSV (défaut : dossier courant)
+  --format FICHIER     copybook décrivant les enregistrements (défaut : formats/apports.cpy)
+  --produits FICHIER   référentiel des produits (défaut : config/produits.csv)
+  --encodage NOM       encodage du serveur (défaut : cp850 ; aussi latin1, cp1252)
+  --force              retraiter un fichier déjà livré
+  --aide               afficher cette aide
+
+Codes de sortie : 0 tout est passé, 1 lignes rejetées, 2 lot refusé, 3 erreur.
+FIN
+    if ($code_sortie) { print STDERR $texte } else { print $texte }
+    exit $code_sortie;
+}

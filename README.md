@@ -119,13 +119,26 @@ Installation : copier le dossier sur le serveur. Il n'y a rien d'autre à instal
   - les apports partent vers une machine : CSV standard (RFC 4180), UTF-8, virgule, dates ISO, point décimal ;
   - les rejets sont lus par une personne dans Excel : point-virgule, BOM, montants avec une virgule.
 
+## Vitesse
+
+Un lot de nuit compte quelques milliers d'apports. La passerelle lit le fichier ligne à ligne, sans le charger en mémoire, quelle que soit sa taille.
+
+Mesure de la CI sur les machines partagées de GitHub, avec 1 million d'apports répartis en 10 lots (83 Mo) :
+
+| | Perl 5.10.1 (le serveur) | Versions récentes |
+|---|---:|---:|
+| Apports convertis par seconde | 12 700 | 34 000 à 55 000 |
+| Lot de nuit de 5 000 apports | 0,4 s | 0,1 à 0,15 s |
+
+À reproduire avec `perl outils/banc.pl 1000000`. Le banc découpe en lots de 100 000, parce que le total d'un lot doit tenir dans son champ `S9(9)V99`, soit moins d'un milliard d'euros.
+
 ## Tests
 
 ```bash
 prove -l t
 ```
 
-Plus de 250 vérifications, toutes avec les seuls modules de base :
+253 vérifications, toutes avec les seuls modules de base :
 
 - **Copybook :**
   - le format de l'ERP, champ par champ ;
